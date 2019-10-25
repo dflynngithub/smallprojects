@@ -1,0 +1,389 @@
+      PROGRAM SANDPILE
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     SANDPILE IS A PROGRAM FOR THE THIRD YEAR COMP LABS, ON THE       C
+C     ORIGINAL BAK-TANG-WIESENFELD SANDPILE MODEL.                     C
+C**********************************************************************C
+      PARAMETER(MXDM=1000)
+C
+C     SPECIFY MATRIX DIMENSIONS
+      MDIM = 20
+      NDIM = 20
+C
+C     ENSURE THAT ARRAY DIMENSIONS DO NOT EXCEED MAXIMUM
+      IF(MDIM.GT.MXDM) THEN
+        WRITE(*,*) 'In SANDPILE: MDIM exceeds maximum dimension.',MDIM
+      ELSEIF(NDIM.GT.MXDM) THEN
+        WRITE(*,*) 'In SANDPILE: NDIM exceeds maximum dimension.',NDIM
+      ENDIF
+C
+C     SPECIFY NUMBER OF TIME INTERVALS
+      ITIME = 2400
+C
+C     RUN THE BTW ROUTINE
+      CALL BTW(MDIM,NDIM,ITIME)
+C     
+      STOP
+      END
+C
+C
+      SUBROUTINE BTW(MDIM,NDIM,ITIME)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     BTW RUNS THE BAK-TANG-WIESENFELD SANDPILE MODEL.                 C
+C**********************************************************************C
+C
+      DIMENSION IZPILE(MDIM,NDIM)
+C
+C     INITIALISE SANDPILE ARRAY IZ
+      DO M=1,MDIM
+        DO N=1,NDIM
+          IZPILE(M,N) = 0
+        ENDDO
+      ENDDO
+C
+C     ERGODIC THEOREM: FILL OUT THE GRID SO WE CAN GET USEFUL DATA
+C     GOTO 99
+      DO IT=1,MDIM*NDIM*8
+C
+C       ADD A GRAIN OF SAND AT A RANDOM SITE
+        CALL ADDGRAIN(IZPILE,MDIM,NDIM)
+C
+C       APPLY AVALANCHE ROUTINE
+        CALL AVALANCHE(IZPILE,MDIM,NDIM,NSIZE,NLIFE,NAREA,NRADS)
+C
+      ENDDO
+99    CONTINUE
+C
+C     OPEN DATA FILE FOR TOTAL NUMBER OF SAND PARTICLES
+      OPEN(UNIT=10,FILE='plots/timecount.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=10)
+C
+C     BEGIN ITERATION OVER TIME INTERVALS
+      DO IT=1,ITIME
+C
+C       ADD A GRAIN OF SAND AT A RANDOM SITE
+        CALL ADDGRAIN(IZPILE,MDIM,NDIM)
+C
+C       APPLY AVALANCHE ROUTINE
+        CALL AVALANCHE(IZPILE,MDIM,NDIM,NSIZE,NLIFE,NAREA,NRADS)
+C
+C       COUNT NUMBER OF GRAINS IN PILE
+        NGRNS = NSAND(IZPILE,MDIM,NDIM)
+C
+C       WRITE RESULTS TO FILE
+        WRITE(10,*) IT,NGRNS,NSIZE,NLIFE,NAREA,NRADS
+C
+      ENDDO
+C
+C     CLOSE COUNTER FILE
+      CLOSE(UNIT=10)
+C
+C     EXPORT SANDPILE TO DATA FILE
+      OPEN(UNIT=20,FILE='plots/sandpile.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=20)
+      DO M=1,MDIM
+        WRITE(20, *) (IZPILE(M,N),N=1,NDIM)
+      ENDDO
+      CLOSE(UNIT=20)
+C
+C     GENERATE PROBABILITY DISTRIBUTIONS FOR CALCULATED QUANTITIES
+      CALL PROBABILITIES(ITIME)
+C
+      RETURN
+      END
+C
+C
+      SUBROUTINE ADDGRAIN(MTRX,MDIM,NDIM)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     ADDS A SINGLE SAND GRAIN TO IZ AT A RANDOM POSITION (M,N).       C
+C**********************************************************************C
+C
+      DIMENSION MTRX(MDIM,NDIM)
+C
+C     GENERATE RANDOM PAIR XRAN,YRAN UNIFORM ON [0.0D0,1.0D0]
+      XRAN = RAND(0)
+      YRAN = RAND(0)
+C
+C     WEIGHTED FUNCTION
+      XFNC = XRAN
+      YFNC = YRAN
+      
+      XFNC = 0.5D0
+      YFNC = 0.5D0
+C
+C     SPREAD TO GRID
+      LOCM = INT(MDIM*XFNC)+1
+      LOCN = INT(NDIM*YFNC)+1
+C
+C     PLACE SAND GRAIN ON THE GRID POINT
+      MTRX(LOCM,LOCN) = MTRX(LOCM,LOCN) + 1
+C
+      RETURN
+      END
+C
+C
+      SUBROUTINE AVALANCHE(MTRX,MDIM,NDIM,NSIZE,NLIFE,NAREA,NRADS)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     AVALANCHE INSTITUTES EQNS(1-3) IN COMP NOTES.                    C
+C**********************************************************************C
+C      
+      DIMENSION MTRX(MDIM,NDIM),ITEMP(MDIM,NDIM)
+C
+C     CRITICAL PARAMETER
+      ICRIT = 4
+
+C     START COUNTER FOR SIZE - # GRAINS DISPLACED IN ITERATION
+      NSIZE = 0
+
+C     START COUNTER FOR LIFETIME - # STEPS TO RELAX
+      NLIFE = 0
+C
+C     START COUNTER FOR RADIUS - DISTANCE FROM ORIGINAL SITE TO FARTHEST
+      NRADS = 0
+C
+C     EMPTY TEMPORARY SITE TRACKING ARRAY
+      DO M=1,MDIM
+        DO N=1,NDIM
+          ITEMP(M,N) = 0
+        ENDDO
+      ENDDO
+C
+      DO ISWEEP=1,MDIM*NDIM
+C
+C       EXIT SWEEP IF ALL ARRAY ELEMENTS BELOW CRITICAL PARAMETER
+        IF(MXPILE(MTRX,MDIM,NDIM).EQ.ICRIT-1) GOTO 100
+C
+C       ADD TO AVALANCE LIFETIME COUNTER
+        NLIFE = NLIFE + 1
+C
+        DO M=1,MDIM
+          DO N=1,NDIM
+C
+C           CHECK IF SITE (M,N) NEEDS TO AVALANCHE
+            IF(MTRX(M,N).GE.ICRIT) THEN
+C
+C             STORE ARRAY LOCATION OF FIRST AVALANCHE SITE
+              IF(ISWEEP.EQ.1) THEN
+                M0 = M
+                N0 = N
+              ENDIF
+C
+C             TOPPLE SITE (M,N)
+              MTRX(M  ,N  ) = MTRX(M  ,N  ) - 4
+C
+C             ADD A GRAIN OF SAND TO EACH SURROUNDING SITE ON ARRAY
+              IF(M.NE.1   ) MTRX(M-1,N  ) = MTRX(M-1,N  ) + 1
+              IF(M.NE.MDIM) MTRX(M+1,N  ) = MTRX(M+1,N  ) + 1
+              IF(N.NE.1   ) MTRX(M  ,N-1) = MTRX(M  ,N-1) + 1
+              IF(N.NE.NDIM) MTRX(M  ,N+1) = MTRX(M  ,N+1) + 1
+C             UPDATE NSIZE FOR GRAINS DISPLACED
+              NSIZE = NSIZE + 4
+C             MARK THIS SITE AS HAVING AVALANCHED
+              ITEMP(M,N) = 1
+            ENDIF
+          ENDDO
+        ENDDO
+      ENDDO
+C
+100   CONTINUE
+C
+C     COUNT AVALANCHE AREA - # UNIQUE SITES TOPPLED
+      NAREA = NSAND(ITEMP,MDIM,NDIM)
+C
+C     COUNT AVALANCHE RADIUS - MAX DISTANCE FROM (M0,N0)
+      NRADS = NRADIUS(ITEMP,MDIM,NDIM,M0,N0)
+C
+      RETURN
+      END    
+C
+C
+      FUNCTION NSAND(MTRX,MDIM,NDIM)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     NSAND COUNTS THE TOTAL NUMBER OF SAND PARTICLES IN THE PILE.     C
+C**********************************************************************C
+C
+      DIMENSION MTRX(MDIM,NDIM)
+C
+      NCOUNT = 0
+C
+      DO M=1,MDIM
+        DO N=1,NDIM
+          NCOUNT = NCOUNT + MTRX(M,N)
+        ENDDO
+      ENDDO
+C
+      NSAND = NCOUNT
+C
+      RETURN
+      END
+C
+C
+      FUNCTION NRADIUS(MTRX,MDIM,NDIM,M0,N0)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     NRADIUS COUNTS MAX DISTANCE FROM (M0,N0) TO ANY OTHER SITE OF    C
+C     AN AVALANCHE THAT OCCURRED IN THE SAME TIME ITERATION.           C
+C**********************************************************************C
+C
+      DIMENSION MTRX(MDIM,NDIM)
+C
+      NRADIUS = 0
+C
+      DO M=1,MDIM
+        DO N=1,NDIM
+          IF(MTRX(M,N).NE.0) THEN
+            NTEMP = IABS(MDIM-M0) + IABS(NDIM-N0)
+            IF(NTEMP.GT.NRADIUS) NRADIUS = NTEMP
+          ENDIF
+        ENDDO
+      ENDDO
+C
+      NSAND = NCOUNT
+C
+      RETURN
+      END
+C
+C
+      FUNCTION MXPILE(MTRX,MDIM,NDIM)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     NSAND COUNTS THE TOTAL NUMBER OF SAND PARTICLES IN THE PILE.     C
+C**********************************************************************C
+C
+      DIMENSION MTRX(MDIM,NDIM)
+C
+      MXPILE = 0
+C
+      DO M=1,MDIM
+        DO N=1,NDIM
+          IF(MTRX(M,N).GT.MXPILE) THEN
+            MXPILE = MTRX(M,N)
+          ENDIF
+        ENDDO
+      ENDDO
+C
+      RETURN
+      END
+C
+C
+      SUBROUTINE PROBABILITIES(ITIME)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     GENERATE PROBABILITY DISTRIBUTIONS FOR CALCULATED QUANTITIES.    C
+C**********************************************************************C
+C
+      DIMENSION NGRNS(ITIME),NSIZE(ITIME),NLIFE(ITIME),NAREA(ITIME),
+     &          NRADS(ITIME)
+      DIMENSION PGRNS(0:ITIME),PSIZE(0:ITIME),PLIFE(0:ITIME),
+     &          PAREA(0:ITIME),PRADS(0:ITIME)
+C
+C     OPEN DATA FILE FOR TOTAL NUMBER OF SAND PARTICLES
+      OPEN(UNIT=10,FILE='plots/timecount.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=10)
+C
+C     READ ALL RESULTS FROM FILE
+      DO IT=1,ITIME
+        READ(10,*) IDUM,NGRNS(IT),NSIZE(IT),NLIFE(IT),
+     &                  NAREA(IT),NRADS(IT)
+      ENDDO
+C
+C     CLOSE COUNTER FILE
+      CLOSE(UNIT=10)
+C
+C     CONTRACT RESULTS INTO SHORTER ARRAY AND TRACK MAX OUTCOME
+      MXGRNS = 0
+      MXSIZE = 0
+	MXLIFE = 0
+	MXAREA = 0
+	MXRADS = 0
+      DO IT=1,ITIME
+        IF(NGRNS(IT).GT.MXGRNS) MXGRNS = NGRNS(IT)
+        IF(NSIZE(IT).GT.MXSIZE) MXSIZE = NSIZE(IT)
+        IF(NLIFE(IT).GT.MXLIFE) MXLIFE = NLIFE(IT)
+        IF(NAREA(IT).GT.MXAREA) MXAREA = NAREA(IT)
+        IF(NRADS(IT).GT.MXRADS) MXRADS = NRADS(IT)
+      ENDDO
+C
+C     NUMBER OF GRAINS - NORMALISED PROBABILITY DENSITY
+      CALL PROBNORM(PGRNS,NGRNS,ITIME,MXGRNS)
+C
+C     WRITE RESULTS TO FILE
+      OPEN(UNIT=11,FILE='plots/pr_grains.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=11)
+        DO N=0,MXGRNS
+          WRITE(11,*) N,PGRNS(N)
+        ENDDO
+      CLOSE(UNIT=11)
+C
+C     AVALANCHE SIZE - NORMALISED PROBABILITY DENSITY
+      CALL PROBNORM(PSIZE,NSIZE,ITIME,MXSIZE)
+C
+C     WRITE RESULTS TO FILE
+      OPEN(UNIT=12,FILE='plots/pr_sizes.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=12)
+        DO N=0,MXSIZE
+          WRITE(12,*) N,PSIZE(N)
+        ENDDO
+      CLOSE(UNIT=12)
+C
+C     AVALANCHE TIME LENGTH - NORMALISED PROBABILITY DENSITY
+      CALL PROBNORM(PLIFE,NLIFE,ITIME,MXLIFE)
+C
+C     WRITE RESULTS TO FILE
+      OPEN(UNIT=13,FILE='plots/pr_lifetimes.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=13)
+        DO N=0,MXLIFE
+          WRITE(13,*) N,PLIFE(N)
+        ENDDO
+      CLOSE(UNIT=13)
+C
+C     AVALANCHE AREA - NORMALISED PROBABILITY DENSITY
+      CALL PROBNORM(PAREA,NAREA,ITIME,MXAREA)
+C
+C     WRITE RESULTS TO FILE
+      OPEN(UNIT=14,FILE='plots/pr_areas.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=14)
+        DO N=0,MXAREA
+          WRITE(14,*) N,PAREA(N)
+        ENDDO
+      CLOSE(UNIT=14)
+C
+C     AVALANCHE RADIUS - NORMALISED PROBABILITY DENSITY
+      CALL PROBNORM(PRADS,NRADS,ITIME,MXRADS)
+C
+C     WRITE RESULTS TO FILE
+      OPEN(UNIT=15,FILE='plots/pr_radii.dat',STATUS='UNKNOWN')
+      REWIND(UNIT=15)
+        DO N=0,MXRADS
+          WRITE(15,*) N,PRADS(N)
+        ENDDO
+      CLOSE(UNIT=15)
+C
+      RETURN
+      END
+C
+C
+      SUBROUTINE PROBNORM(PDF,NOUT,ITIME,NMAX)
+      IMPLICIT DOUBLE PRECISION (A-H,O-Z)
+C**********************************************************************C
+C     GENERATE PROBABILITY DISTRIBUTIONS FOR CALCULATED QUANTITIES.    C
+C**********************************************************************C
+C
+      DIMENSION NOUT(ITIME),PDF(0:NMAX)
+C
+C     FOR EACH OUTCOME N, COUNT AND ORDER NUMBER OF RESULTS
+      DO N=0,NMAX
+        NCOUNT = 0
+        DO IT=1,ITIME
+          IF(NOUT(IT).EQ.N) NCOUNT = NCOUNT + 1
+        ENDDO
+        PDF(N) = NCOUNT/DFLOAT(ITIME)
+      ENDDO    
+C
+      RETURN
+      END
+C
